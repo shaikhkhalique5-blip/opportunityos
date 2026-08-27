@@ -1,2 +1,0 @@
-# opportunityos
-Scalee opportunityos
