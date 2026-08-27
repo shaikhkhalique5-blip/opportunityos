@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: opportunityos
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports: ["5432:5432"]
+  api:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes: ["./backend:/app"]
+    command: sh -c "pip install -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@db:5432/opportunityos}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+    ports: ["8000:8000"]
+    depends_on: [db]
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    volumes: ["./frontend:/app"]
+    command: sh -c "npm install && npm run dev -- --hostname 0.0.0.0"
+    ports: ["3000:3000"]
+    depends_on: [api]
