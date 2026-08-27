@@ -18,25 +18,18 @@ Return only valid JSON matching the supplied schema.
 """
 
 
-def analyze(req: OpportunityRequest, research_docs: list[dict], product_brain: dict | None = None) -> OpportunityResponse:
-    if not settings.openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY is not configured")
-    client = OpenAI(api_key=settings.openai_api_key)
-    seller_context = product_brain or {"product_description": req.seller_product}
-    payload = {
-        "seller_context": seller_context,
-        "icp": req.icp.model_dump(),
-        "company_url": str(req.company_url),
-        "research_documents": research_docs,
-        "instruction": "Find a genuine buying window for this seller product. Prefer a well-supported rejection to weak speculation.",
-    }
-    schema = OpportunityResponse.model_json_schema()
-    completion = client.responses.create(
-        model=settings.openai_model,
-        input=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(payload)},
-        ],
-        text={"format": {"type": "json_schema", "name": "opportunity", "schema": schema, "strict": True}},
-    )
-    return OpportunityResponse.model_validate_json(completion.output_text)
+def make_strict_schema(node):
+    if isinstance(node, dict):
+        if node.get("type") == "object":
+            properties = node.get("properties", {})
+            node["additionalProperties"] = False
+            node["required"] = list(properties.keys())
+
+        for value in node.values():
+            make_strict_schema(value)
+
+    elif isinstance(node, list):
+        for item in node:
+            make_strict_schema(item)
+
+    return node
