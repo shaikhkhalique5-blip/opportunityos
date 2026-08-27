@@ -33,3 +33,59 @@ def make_strict_schema(node):
             make_strict_schema(item)
 
     return node
+
+
+def analyze(
+    req: OpportunityRequest,
+    research_docs: list[dict],
+    product_brain: dict | None = None,
+) -> OpportunityResponse:
+    if not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+
+    client = OpenAI(api_key=settings.openai_api_key)
+
+    seller_context = product_brain or {
+        "product_description": req.seller_product
+    }
+
+    payload = {
+        "seller_context": seller_context,
+        "icp": req.icp.model_dump(),
+        "company_url": str(req.company_url),
+        "research_documents": research_docs,
+        "instruction": (
+            "Find a genuine buying window for this seller product. "
+            "Prefer a well-supported rejection to weak speculation."
+        ),
+    }
+
+    schema = make_strict_schema(
+        OpportunityResponse.model_json_schema()
+    )
+
+    completion = client.responses.create(
+        model=settings.openai_model,
+        input=[
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT,
+            },
+            {
+                "role": "user",
+                "content": json.dumps(payload),
+            },
+        ],
+        text={
+            "format": {
+                "type": "json_schema",
+                "name": "opportunity",
+                "schema": schema,
+                "strict": True,
+            }
+        },
+    )
+
+    return OpportunityResponse.model_validate_json(
+        completion.output_text
+    )
