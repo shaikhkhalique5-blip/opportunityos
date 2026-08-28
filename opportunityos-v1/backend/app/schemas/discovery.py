@@ -45,6 +45,24 @@ class SellerBrain(BaseModel):
     trigger_signals: list[SignalDefinition] = Field(default_factory=list)
 
 
+class CandidateCompany(BaseModel):
+    company_name: str
+    country: str | None = None
+    industry: str | None = None
+    why_candidate: str
+    evidence_urls: list[str] = Field(default_factory=list)
+
+
+class CandidateExtraction(BaseModel):
+    companies: list[CandidateCompany] = Field(default_factory=list)
+
+
+class CompanyResolution(BaseModel):
+    company_name: str
+    website: str | None = None
+    confidence: int = Field(ge=0, le=100)
+
+
 class Evidence(BaseModel):
     title: str
     url: str
