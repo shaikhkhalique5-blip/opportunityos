@@ -35,7 +35,7 @@ def _company_from_person(person: dict) -> dict | None:
         "country": location_details.get("country") or company.get("country") or company.get("location") or person.get("company_location"),
         "headcount": company.get("estimated_number_of_employees") or company.get("employee_count") or company.get("size"),
         "industry": company.get("industry") or person.get("company_industry"),
-        "why_candidate": "Matched Amplemarket ICP and buyer-role search filters.",
+        "why_candidate": "Matched Amplemarket discovery filters; final fit must be verified by OpportunityOS research.",
         "discovery_evidence_urls": [u for u in [company.get("linkedin_url"), website] if u],
         "amplemarket_company_id": company.get("id"),
         "amplemarket_contact": {
@@ -60,7 +60,6 @@ async def amplemarket_health() -> dict:
 
 
 async def amplemarket_people_search_test() -> dict:
-    """One-result provider test. No OpenAI calls and no contact enrichment."""
     if not settings.amplemarket_api_key:
         return {"ok": False, "reason": "not_configured"}
     headers = {"Authorization": f"Bearer {settings.amplemarket_api_key}", "Content-Type": "application/json"}
@@ -91,6 +90,45 @@ async def amplemarket_people_search_test() -> dict:
             return {"ok": False, "reason": f"{type(exc).__name__}: {str(exc)[:250]}"}
 
 
+def _error_pointer(response: httpx.Response) -> str | None:
+    try:
+        errors = response.json().get("_errors") or []
+        if not errors:
+            return None
+        pointer = ((errors[0].get("source") or {}).get("pointer") or "").lstrip("/")
+        return pointer or None
+    except Exception:
+        return None
+
+
+async def _search_with_relaxation(client: httpx.AsyncClient, headers: dict, body: dict) -> httpx.Response:
+    """Retry Amplemarket when a free-form filter is not in its supported enum list."""
+    current = dict(body)
+    for attempt in range(6):
+        r = await client.post("https://api.amplemarket.com/people/search", headers=headers, json=current)
+        print(f"DISCOVERY amplemarket_attempt={attempt + 1} http={r.status_code} filters={sorted(current.keys())}", flush=True)
+        if r.is_success:
+            return r
+        if r.status_code != 400:
+            return r
+        pointer = _error_pointer(r)
+        if pointer and pointer in current:
+            print(f"DISCOVERY amplemarket_relax removing={pointer}", flush=True)
+            current.pop(pointer, None)
+            continue
+        # If Amplemarket does not identify the field, relax the riskiest enum filters in order.
+        removed = False
+        for key in ("company_industries", "person_job_functions", "person_titles", "company_sizes", "company_locations"):
+            if key in current:
+                print(f"DISCOVERY amplemarket_relax removing={key}", flush=True)
+                current.pop(key, None)
+                removed = True
+                break
+        if not removed:
+            return r
+    return r
+
+
 async def amplemarket_candidates(req: DiscoveryRequest, brain: SellerBrain) -> list[dict]:
     if not settings.amplemarket_api_key:
         return []
@@ -107,10 +145,9 @@ async def amplemarket_candidates(req: DiscoveryRequest, brain: SellerBrain) -> l
     body = {k: v for k, v in body.items() if v not in (None, [], "")}
     async with httpx.AsyncClient(timeout=40, follow_redirects=True) as client:
         try:
-            r = await client.post("https://api.amplemarket.com/people/search", headers=headers, json=body)
-            print(f"DISCOVERY amplemarket_http={r.status_code}", flush=True)
+            r = await _search_with_relaxation(client, headers, body)
             if not r.is_success:
-                print(f"DISCOVERY amplemarket_error_body={(r.text or '')[:700]}", flush=True)
+                print(f"DISCOVERY amplemarket_final_error={(r.text or '')[:700]}", flush=True)
                 return []
             data = r.json()
             rows = data.get("results") or data.get("people") or data.get("data") or []
