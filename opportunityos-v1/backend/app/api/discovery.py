@@ -5,7 +5,7 @@ from pypdf import PdfReader
 from pptx import Presentation
 
 from app.schemas.discovery import DiscoveryRequest, DiscoveryResponse
-from app.services.amplemarket import amplemarket_health
+from app.services.amplemarket import amplemarket_health, amplemarket_people_search_test
 from app.services.discovery import push_to_amplemarket
 from app.services.discovery_amplemarket import run_discovery
 
@@ -23,6 +23,11 @@ async def discover(req: DiscoveryRequest):
 @router.get("/amplemarket-health")
 async def amplemarket_provider_health():
     return await amplemarket_health()
+
+
+@router.get("/amplemarket-people-test")
+async def amplemarket_people_provider_test():
+    return await amplemarket_people_search_test()
 
 
 @router.post("/deck")
