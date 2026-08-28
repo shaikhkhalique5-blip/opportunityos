@@ -5,7 +5,8 @@ from pypdf import PdfReader
 from pptx import Presentation
 
 from app.schemas.discovery import DiscoveryRequest, DiscoveryResponse
-from app.services.discovery import push_to_amplemarket, run_discovery
+from app.services.discovery import push_to_amplemarket
+from app.services.discovery_amplemarket import run_discovery
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
