@@ -1,114 +1,19 @@
 'use client';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useState } from 'react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
-const split = (v: FormDataEntryValue | null) => String(v || '').split(',').map(x=>x.trim()).filter(Boolean);
-
-type Tab = 'analyze'|'product'|'history';
+const API=process.env.NEXT_PUBLIC_API_URL||'http://localhost:8000/api/v1';
+const split=(v:FormDataEntryValue|null)=>String(v||'').split(',').map(x=>x.trim()).filter(Boolean);
+type Tab='discover'|'analyze'|'integrations';
 
 export default function Home(){
-  const [tab,setTab]=useState<Tab>('analyze');
-  const [products,setProducts]=useState<any[]>([]);
-  const [runs,setRuns]=useState<any[]>([]);
-  const [result,setResult]=useState<any>(null);
-  const [loading,setLoading]=useState(false);
-  const [error,setError]=useState('');
+ const [tab,setTab]=useState<Tab>('discover'); const [data,setData]=useState<any>(null); const [loading,setLoading]=useState(false); const [error,setError]=useState('');
+ async function discover(e:FormEvent<HTMLFormElement>){e.preventDefault();setLoading(true);setError('');setData(null);const f=new FormData(e.currentTarget);const body={seller:{website:f.get('website'),company_name:f.get('company_name')||null,deck_text:f.get('deck_text')||null,product_hint:f.get('product_hint')||null},icp:{countries:split(f.get('countries')),industries:split(f.get('industries')),target_functions:split(f.get('functions')),target_titles:split(f.get('titles')),headcount_min:Number(f.get('headcount_min')||50),headcount_max:Number(f.get('headcount_max')||5000),account_limit:Number(f.get('account_limit')||10),signal_window_days:Number(f.get('signal_window_days')||90)}};try{const r=await fetch(`${API}/discovery/run`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw new Error(j.detail||'Discovery failed');setData(j)}catch(x:any){setError(x.message||'Discovery failed')}finally{setLoading(false)}}
+ return <div className="shell"><aside className="sidebar"><div className="brand">Scalee <span>OpportunityOS</span></div><div className="tag">Universal Buying-Signal Intelligence</div><div className="nav"><button className={tab==='discover'?'active':''} onClick={()=>setTab('discover')}>🔥 Find Opportunities</button><button className={tab==='analyze'?'active':''} onClick={()=>setTab('analyze')}>◎ Opportunity Analyst</button><button className={tab==='integrations'?'active':''} onClick={()=>setTab('integrations')}>⚙ Integrations</button></div></aside><main className="main"><div className="topbar"><div><div className="eyebrow">Universal Discovery V1</div><h1 className="title">Find accounts with a reason to buy now.</h1><div className="muted">Seller intelligence → market discovery → verified signals → ranked accounts → buyer map.</div></div><span className="pill">Human-controlled outreach</span></div>{error&&<div className="error">{error}</div>}
+ {tab==='discover'&&<><div className="grid"><section className="card"><h2>Define your market</h2><p className="muted">Give us your company. OpportunityOS learns the product and generates the signal taxonomy automatically.</p><form onSubmit={discover}><div className="row"><div className="field"><label>Your company website</label><input name="website" placeholder="https://yourcompany.com" required/></div><div className="field"><label>Company name</label><input name="company_name" placeholder="Optional"/></div></div><div className="field"><label>Company deck / product context</label><textarea name="deck_text" placeholder="Paste deck text or key product context. File upload is the next ingestion adapter."/></div><div className="field"><label>What are you selling? (optional hint)</label><input name="product_hint" placeholder="AI workflow automation, Voice AI, finance automation..."/></div><div className="field"><label>Countries / regions</label><input name="countries" defaultValue="United States, UAE, Saudi Arabia, Qatar, Kuwait, Oman, Bahrain"/></div><div className="row"><div className="field"><label>Headcount minimum</label><input name="headcount_min" type="number" defaultValue="50"/></div><div className="field"><label>Headcount maximum</label><input name="headcount_max" type="number" defaultValue="5000"/></div></div><div className="field"><label>Industries (optional)</label><input name="industries" placeholder="Leave blank for AI suggestions"/></div><div className="row"><div className="field"><label>Target functions</label><input name="functions" placeholder="Operations, Finance, Supply Chain"/></div><div className="field"><label>Target job titles</label><input name="titles" placeholder="COO, VP Operations, Head of Transformation"/></div></div><div className="row"><div className="field"><label>Accounts to deeply research</label><input name="account_limit" type="number" min="5" max="100" defaultValue="10"/></div><div className="field"><label>Signal window (days)</label><input name="signal_window_days" type="number" defaultValue="90"/></div></div><button className="btn" disabled={loading}>{loading?'Discovering + researching…':'Find Opportunities'}</button></form></section><section className="card"><h2>Product Brain</h2>{data?<Brain b={data.seller_brain}/>:<div className="empty">Run discovery to generate your dynamic Product Brain and buying-signal map.</div>}</section></div>{data&&<Results data={data}/>}</>}
+ {tab==='analyze'&&<section className="card"><h2>Opportunity Analyst</h2><p className="muted">The existing single-account analyst remains available through the backend. Universal Discovery now sits upstream and determines which accounts deserve deep analysis first.</p><div className="empty">Use Find Opportunities to discover and prioritize accounts. Single-account analysis remains at <code>/api/v1/opportunities/analyze</code>.</div></section>}
+ {tab==='integrations'&&<section className="card"><h2>Integration status</h2><p className="muted">Providers are optional and degrade gracefully. Configure credentials in Railway backend variables.</p>{data?Object.entries(data.provider_status||{}).map(([k,v]:any)=><div className="metric" key={k}><span>{k}</span><strong>{v}</strong></div>):<div className="empty">Run discovery once to see live provider status.</div>}</section>}
+ </main></div>}
 
-  async function load(){
-    try{
-      const [p,r]=await Promise.all([fetch(`${API}/products`),fetch(`${API}/opportunities/runs`)]);
-      if(p.ok) setProducts(await p.json());
-      if(r.ok) setRuns(await r.json());
-    }catch{}
-  }
-  useEffect(()=>{load()},[]);
-
-  async function analyze(e:FormEvent<HTMLFormElement>){
-    e.preventDefault(); setLoading(true); setError(''); setResult(null);
-    const f=new FormData(e.currentTarget);
-    const productId=Number(f.get('product_brain_id')||0)||null;
-    const body:any={
-      company_url:f.get('company_url'), product_brain_id:productId,
-      seller_product:productId?null:f.get('seller_product'),
-      icp:{geographies:split(f.get('geographies')),industries:split(f.get('industries')),buyers:split(f.get('buyers')),company_size:f.get('company_size')||null}
-    };
-    try{
-      const r=await fetch(`${API}/opportunities/analyze`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      const json=await r.json(); if(!r.ok) throw new Error(json.detail||'Analysis failed');
-      setResult(json); await load();
-    }catch(err:any){setError(err.message||'Analysis failed')} finally{setLoading(false)}
-  }
-
-  async function saveProduct(e:FormEvent<HTMLFormElement>){
-    e.preventDefault(); setError('');
-    const f=new FormData(e.currentTarget);
-    const body={name:f.get('name'),product_description:f.get('product_description'),markets:split(f.get('markets')),problems_solved:split(f.get('problems_solved')),target_buyers:split(f.get('target_buyers')),differentiators:split(f.get('differentiators')),proof_points:split(f.get('proof_points'))};
-    try{
-      const r=await fetch(`${API}/products`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      const j=await r.json(); if(!r.ok) throw new Error(j.detail||'Could not save Product Brain');
-      (e.currentTarget as HTMLFormElement).reset(); await load(); setTab('analyze');
-    }catch(err:any){setError(err.message)}
-  }
-
-  async function feedback(runId:number, value:string){
-    await fetch(`${API}/opportunities/runs/${runId}/feedback`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({feedback:value})});
-    await load();
-  }
-
-  const stats=useMemo(()=>({
-    analyzed:runs.length,
-    hot:runs.filter(x=>Number(x.score)>=80).length,
-    accepted:runs.filter(x=>x.feedback==='accepted'||x.feedback==='meeting'||x.feedback==='sql'||x.feedback==='won').length,
-    avg:runs.length?Math.round(runs.reduce((a,x)=>a+Number(x.score||0),0)/runs.length):0
-  }),[runs]);
-
-  return <div className="shell">
-    <aside className="sidebar"><div className="brand">Scalee <span>OpportunityOS</span></div><div className="tag">AI Opportunity Intelligence</div><div className="nav">
-      <button className={tab==='analyze'?'active':''} onClick={()=>setTab('analyze')}>◎ Opportunity Analyst</button>
-      <button className={tab==='product'?'active':''} onClick={()=>setTab('product')}>◈ Product Brain</button>
-      <button className={tab==='history'?'active':''} onClick={()=>setTab('history')}>≡ Analysis History</button>
-    </div></aside>
-    <main className="main">
-      <div className="topbar"><div><div className="eyebrow">Level 3 Opportunity Analyst</div><h1 className="title">Know who to talk to — and why now.</h1><div className="muted">Evidence-backed intelligence before outbound begins.</div></div><span className="pill">V1 · Human-controlled outreach</span></div>
-      {error&&<div className="error">{error}</div>}
-      <div className="kpis"><div className="kpi"><span className="small">Analyzed</span><b>{stats.analyzed}</b></div><div className="kpi"><span className="small">Hot opportunities</span><b>{stats.hot}</b></div><div className="kpi"><span className="small">Accepted</span><b>{stats.accepted}</b></div><div className="kpi"><span className="small">Average score</span><b>{stats.avg}</b></div></div>
-
-      {tab==='analyze'&&<div className="grid">
-        <section className="card"><h2>Analyze a company</h2><p className="muted">The Research Engine checks the company site, relevant internal pages, recent news, and optional broader web search.</p>
-          <form onSubmit={analyze}>
-            <div className="field"><label>Company URL</label><input name="company_url" placeholder="https://company.com" required/></div>
-            <div className="field"><label>Product Brain</label><select name="product_brain_id"><option value="">Use one-off product description</option>{products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-            <div className="field"><label>One-off seller product (used if no Product Brain selected)</label><textarea name="seller_product" defaultValue="Qualified B2B meetings and pipeline generation for companies selling AI."/></div>
-            <div className="row"><div className="field"><label>Geographies</label><input name="geographies" placeholder="India, GCC, UK, US"/></div><div className="field"><label>Company size</label><input name="company_size" placeholder="50-2000 employees"/></div></div>
-            <div className="row"><div className="field"><label>Industries</label><input name="industries" placeholder="AI, SaaS, Fintech"/></div><div className="field"><label>Likely buyers</label><input name="buyers" placeholder="CRO, VP Sales, CEO"/></div></div>
-            <button className="btn" disabled={loading}>{loading?'Researching + reasoning…':'Run Opportunity Analyst'}</button>
-          </form>
-        </section>
-        <section className="stack">{result?<ResultCard result={result}/>:<div className="card empty"><h3>No analysis yet</h3><p>Run a company to see buying signals, evidence, score, buyer map, sales hook, and recommended action.</p></div>}</section>
-      </div>}
-
-      {tab==='product'&&<div className="grid"><section className="card"><h2>Create Product Brain</h2><p className="muted">Teach OpportunityOS what you sell, who buys it, and what real problems it solves.</p><form onSubmit={saveProduct}>
-        <div className="field"><label>Name</label><input name="name" placeholder="Scalee Pipeline Generation" required/></div>
-        <div className="field"><label>Product / offer</label><textarea name="product_description" placeholder="What exactly do you sell?" required/></div>
-        <div className="field"><label>Markets</label><input name="markets" placeholder="India, GCC, UK, US"/></div>
-        <div className="field"><label>Problems solved</label><textarea name="problems_solved" placeholder="Poor outbound pipeline, founder-led sales bottleneck, weak response rates"/></div>
-        <div className="field"><label>Target buyers</label><input name="target_buyers" placeholder="Founder, CRO, VP Sales"/></div>
-        <div className="field"><label>Differentiators</label><textarea name="differentiators" placeholder="What makes this offer credibly different?"/></div>
-        <div className="field"><label>Proof points</label><textarea name="proof_points" placeholder="Case studies, results, customer proof"/></div>
-        <button className="btn">Save Product Brain</button>
-      </form></section><section className="card"><h2>Saved brains</h2>{products.length?<div className="productList">{products.map(p=><div className="productItem" key={p.id}><div><strong>{p.name}</strong><div className="small">{p.target_buyers?.join(', ')||'No buyers saved'}</div></div><span className="pill">#{p.id}</span></div>)}</div>:<div className="empty">No Product Brains yet.</div>}</section></div>}
-
-      {tab==='history'&&<section className="card"><h2>Opportunity history</h2><p className="muted">Human feedback becomes the first layer of your future learning loop.</p>{runs.length?<div className="history">{runs.map(run=><div className="historyItem" key={run.id} onClick={()=>{setResult(run.response);setTab('analyze')}}><div className="historyTop"><div><strong>{run.company}</strong><div className="small">{new Date(run.created_at).toLocaleString()} · {run.confidence} confidence</div></div><div className="historyScore">{run.score}/100</div></div><p>{run.why_now}</p><div className="feedback" onClick={e=>e.stopPropagation()}>{['accepted','rejected','contacted','meeting','sql','won','lost'].map(v=><button key={v} onClick={()=>feedback(run.id,v)}>{run.feedback===v?'✓ ':''}{v}</button>)}</div></div>)}</div>:<div className="empty">No saved analyses yet.</div>}</section>}
-    </main>
-  </div>
-}
-
-function ResultCard({result}:{result:any}){
-  const parts=result.score_breakdown||{};
-  return <><div className="card"><div className="sectionLabel">{result.company}</div><div style={{display:'flex',justifyContent:'space-between',alignItems:'end'}}><div><div className="score">{result.opportunity_score}</div><div className="small">Opportunity score / 100</div></div><span className="pill">{result.confidence} confidence</span></div></div>
-    <div className="card"><div className="sectionLabel">Why now</div><p className="hook">{result.why_now}</p><div className="sectionLabel">Likely problem</div><p>{result.likely_business_problem}</p><div className="row"><div><div className="sectionLabel">Best buyer</div><strong>{result.best_buyer}</strong></div><div><div className="sectionLabel">Secondary</div><strong>{result.secondary_buyer||'—'}</strong></div></div></div>
-    <div className="card"><h3>Recent signals</h3>{result.recent_signals?.length?result.recent_signals.map((s:any,i:number)=><div className="signal" key={i}><strong>{s.type} · {s.strength}/100</strong><span>{s.description}</span><div className="small">{s.recency_days==null?'Date uncertain':`${s.recency_days} days ago`}</div></div>):<div className="empty">No strong signals found.</div>}</div>
-    <div className="card"><h3>Score breakdown</h3>{Object.entries(parts).map(([k,v]:any)=><div className="metric" key={k}><span>{k.replaceAll('_',' ')}</span><strong>{Math.round(Number(v))}</strong></div>)}</div>
-    <div className="card"><div className="sectionLabel">Sales hook</div><p className="hook">{result.sales_hook}</p><div className="sectionLabel">Recommended next action</div><p>{result.recommended_next_action}</p>{result.rejection_reason&&<div className="error">Reject / nurture reason: {result.rejection_reason}</div>}</div>
-    <div className="card"><h3>Evidence</h3>{result.evidence?.map((e:any,i:number)=><div className="evidence" key={i}><strong>{e.claim}</strong><div className="small">{e.source_name} · {e.published_date||'date unknown'} · {e.confidence}% confidence</div><a href={e.source_url} target="_blank" rel="noreferrer">Open source ↗</a></div>)}</div></>
-}
+function Brain({b}:{b:any}){return <div><div className="sectionLabel">{b.company_name}</div><p className="hook">{b.product_summary}</p><div className="sectionLabel">Problems solved</div><p>{b.problems_solved?.join(' · ')}</p><div className="sectionLabel">Target buyers</div><p>{b.target_titles?.join(' · ')}</p><div className="sectionLabel">Dynamic signals</div>{b.trigger_signals?.map((s:any,i:number)=><div className="signal" key={i}><strong>{s.name} · weight {s.weight}/10</strong><span>{s.description}</span></div>)}</div>}
+function Results({data}:{data:any}){const a=data.accounts||[];return <section className="results"><div className="kpis"><div className="kpi"><span className="small">Candidates</span><b>{data.candidate_count}</b></div><div className="kpi"><span className="small">Researched</span><b>{data.researched_count}</b></div><div className="kpi"><span className="small">85+ hot</span><b>{a.filter((x:any)=>x.score>=85).length}</b></div><div className="kpi"><span className="small">95+ immediate</span><b>{a.filter((x:any)=>x.score>=95).length}</b></div></div><div className="card"><h2>Ranked opportunity feed</h2>{a.length?a.map((x:any)=><Account x={x} key={x.website}/>):<div className="empty">No evidence-backed opportunities found in this run. Broaden filters or connect Apollo/Tavily.</div>}</div></section>}
+function Account({x}:{x:any}){return <div className="opportunity"><div className="opHead"><div><span className="pill">{String(x.tier).replaceAll('_',' ')}</span><h3>{x.company_name}</h3><div className="small">{[x.country,x.industry,x.headcount&&`${x.headcount} employees`].filter(Boolean).join(' · ')}</div></div><div className="score smallScore">{x.score}</div></div><div className="sectionLabel">Why now</div><p>{x.why_now}</p><div className="sectionLabel">Product fit</div><p>{x.product_fit}</p><div className="buyerGrid">{x.top_buyers?.slice(0,3).map((b:any,i:number)=><div className="buyer" key={i}><strong>{b.title}</strong><span className="small">{b.role.replaceAll('_',' ')}</span><p>{b.why}</p><span className="small">Channels: {b.preferred_channels?.join(' → ')}</span></div>)}</div>{x.signals?.map((s:any,i:number)=><div className="signal" key={i}><strong>{s.signal} · {s.strength}/100</strong><span>{s.why_it_matters}</span>{s.evidence?.map((e:any,j:number)=><div className="evidence" key={j}><a href={e.url} target="_blank" rel="noreferrer">{e.title} ↗</a><div className="small">{e.source_type} · {e.published_date||'date unknown'} · {e.confidence}% confidence</div><div>{e.snippet}</div></div>)}</div>)}</div>}
