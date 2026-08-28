@@ -5,6 +5,7 @@ from pypdf import PdfReader
 from pptx import Presentation
 
 from app.schemas.discovery import DiscoveryRequest, DiscoveryResponse
+from app.services.amplemarket import amplemarket_health
 from app.services.discovery import push_to_amplemarket
 from app.services.discovery_amplemarket import run_discovery
 
@@ -17,6 +18,11 @@ async def discover(req: DiscoveryRequest):
         return await run_discovery(req)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/amplemarket-health")
+async def amplemarket_provider_health():
+    return await amplemarket_health()
 
 
 @router.post("/deck")
