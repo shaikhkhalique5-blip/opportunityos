@@ -1,10 +1,13 @@
+import asyncio
 from io import BytesIO
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pypdf import PdfReader
 from pptx import Presentation
 
-from app.schemas.discovery import DiscoveryRequest, DiscoveryResponse
+from app.core.db import SessionLocal
+from app.models import DiscoveryRun
+from app.schemas.discovery import DiscoveryRequest
 from app.services.amplemarket import amplemarket_health, amplemarket_people_search_test
 from app.services.discovery import push_to_amplemarket
 from app.services.discovery_amplemarket import run_discovery
@@ -12,12 +15,58 @@ from app.services.discovery_amplemarket import run_discovery
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
 
-@router.post("/run", response_model=DiscoveryResponse)
-async def discover(req: DiscoveryRequest):
+def _set_run(run_id: int, **values):
+    db = SessionLocal()
     try:
-        return await run_discovery(req)
+        row = db.get(DiscoveryRun, run_id)
+        if row:
+            for key, value in values.items():
+                setattr(row, key, value)
+            db.commit()
+    finally:
+        db.close()
+
+
+async def _execute_run(run_id: int, req: DiscoveryRequest):
+    _set_run(run_id, status="running", stage="Discovering accounts")
+    try:
+        result = await run_discovery(req)
+        _set_run(run_id, status="completed", stage="Complete", response_json=result.model_dump(mode="json"), error=None)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _set_run(run_id, status="failed", stage="Failed", error=f"{type(exc).__name__}: {str(exc)[:1500]}")
+
+
+@router.post("/runs")
+async def create_discovery_run(req: DiscoveryRequest):
+    db = SessionLocal()
+    try:
+        row = DiscoveryRun(status="queued", stage="Queued", request_json=req.model_dump(mode="json"))
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        run_id = row.id
+    finally:
+        db.close()
+    asyncio.create_task(_execute_run(run_id, req))
+    return {"run_id": run_id, "status": "queued", "stage": "Queued"}
+
+
+@router.get("/runs/{run_id}")
+async def get_discovery_run(run_id: int):
+    db = SessionLocal()
+    try:
+        row = db.get(DiscoveryRun, run_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Discovery run not found")
+        return {"run_id": row.id, "status": row.status, "stage": row.stage, "result": row.response_json, "error": row.error}
+    finally:
+        db.close()
+
+
+# Compatibility endpoint. New UI uses /runs so browser requests never wait for deep research.
+@router.post("/run")
+async def discover_legacy(req: DiscoveryRequest):
+    return await run_discovery(req)
 
 
 @router.get("/amplemarket-health")
