@@ -7,10 +7,11 @@ from pptx import Presentation
 
 from app.core.db import SessionLocal
 from app.models import DiscoveryRun
-from app.schemas.discovery import DiscoveryRequest
+from app.schemas.discovery import DiscoveryRequest, SellerInput
 from app.services.amplemarket import amplemarket_health, amplemarket_people_search_test
 from app.services.discovery import push_to_amplemarket
 from app.services.discovery_amplemarket import run_discovery
+from app.services.icp_preview import generate_icp_preview
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
@@ -59,6 +60,15 @@ async def _execute_run(run_id: int, req: DiscoveryRequest):
         _set_run(run_id, status="completed", stage="Complete", response_json=result.model_dump(mode="json"), error=None)
     except Exception as exc:
         _set_run(run_id, status="failed", stage="Failed", error=f"{type(exc).__name__}: {str(exc)[:1500]}")
+
+
+@router.post("/icp-preview")
+async def create_icp_preview(seller: SellerInput):
+    try:
+        preview = await generate_icp_preview(seller)
+        return preview.model_dump(mode="json")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not generate ICP preview: {str(exc)[:1000]}") from exc
 
 
 @router.post("/runs")

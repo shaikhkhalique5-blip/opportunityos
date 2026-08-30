@@ -45,6 +45,36 @@ class SellerBrain(BaseModel):
     trigger_signals: list[SignalDefinition] = Field(default_factory=list)
 
 
+class ICPSegment(BaseModel):
+    name: str
+    priority: Literal["primary", "secondary", "exploratory"]
+    industries: list[str] = Field(default_factory=list)
+    countries: list[str] = Field(default_factory=list)
+    headcount_min: int = Field(ge=1)
+    headcount_max: int = Field(ge=1)
+    target_functions: list[str] = Field(default_factory=list)
+    target_titles: list[str] = Field(default_factory=list)
+    buying_triggers: list[str] = Field(default_factory=list)
+    why_fit: str
+
+
+class ICPPreview(BaseModel):
+    company_name: str
+    product_summary: str
+    confidence: int = Field(ge=0, le=100)
+    recommended_countries: list[str] = Field(default_factory=list)
+    recommended_industries: list[str] = Field(default_factory=list)
+    recommended_functions: list[str] = Field(default_factory=list)
+    recommended_titles: list[str] = Field(default_factory=list)
+    headcount_min: int = Field(ge=1)
+    headcount_max: int = Field(ge=1)
+    account_limit: int = Field(default=10, ge=5, le=100)
+    signal_window_days: int = Field(default=90, ge=7, le=365)
+    segments: list[ICPSegment] = Field(default_factory=list)
+    trigger_signals: list[SignalDefinition] = Field(default_factory=list)
+    rationale: str
+
+
 class CandidateCompany(BaseModel):
     company_name: str
     country: str | None = None
