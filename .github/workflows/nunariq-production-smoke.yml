@@ -1,0 +1,93 @@
+name: NunarIQ Production Smoke Test
+
+on:
+  push:
+    paths:
+      - '.github/workflows/nunariq-production-smoke.yml'
+
+jobs:
+  validate-nunariq:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      API: https://opportunityos-backend-production.up.railway.app/api/v1
+    steps:
+      - name: Generate NunarIQ ICP preview
+        shell: bash
+        run: |
+          cat > seller.json <<'JSON'
+          {
+            "website": "https://nunariq.com",
+            "company_name": "NunarIQ",
+            "deck_text": "Nunar CustomsIQ - Dubai Customs Paperwork, Done. In Minutes. AI-powered operations intelligence for freight forwarders. Reads commercial invoices, packing lists, bills of lading and other customs documents from PDF/image/email; extracts 40+ fields; validates against UAE customs rules and business logic; auto-submits to Dubai Trade Portal via RPA; human-in-the-loop review for exceptions. Problems: manual re-keying, 8+ documents per shipment, data-entry errors causing holds/fines/client dissatisfaction, staff time spent on data entry. Inputs can arrive via email, browser upload, WhatsApp/shared folder.",
+            "product_hint": "customs clearance automation for UAE freight forwarders and customs operations"
+          }
+          JSON
+
+          code=$(curl --silent --show-error --max-time 240 \
+            -o preview.json -w '%{http_code}' \
+            -X POST "$API/discovery/icp-preview" \
+            -H 'Content-Type: application/json' \
+            --data-binary @seller.json)
+          echo "ICP preview HTTP $code"
+          jq . preview.json
+          test "$code" = "200"
+          jq -e '.company_name and .product_summary and (.segments | length >= 1) and (.recommended_industries | length >= 1) and (.recommended_titles | length >= 1)' preview.json >/dev/null
+
+      - name: Approve generated ICP and start one discovery run
+        shell: bash
+        run: |
+          jq -n \
+            --slurpfile seller seller.json \
+            --slurpfile p preview.json \
+            '{
+              seller: $seller[0],
+              icp: {
+                countries: $p[0].recommended_countries,
+                industries: $p[0].recommended_industries,
+                target_functions: $p[0].recommended_functions,
+                target_titles: $p[0].recommended_titles,
+                headcount_min: $p[0].headcount_min,
+                headcount_max: $p[0].headcount_max,
+                account_limit: $p[0].account_limit,
+                signal_window_days: $p[0].signal_window_days
+              }
+            }' > discovery.json
+
+          code=$(curl --silent --show-error --max-time 60 \
+            -o run.json -w '%{http_code}' \
+            -X POST "$API/discovery/runs" \
+            -H 'Content-Type: application/json' \
+            --data-binary @discovery.json)
+          echo "Discovery start HTTP $code"
+          jq . run.json
+          test "$code" = "200"
+          run_id=$(jq -r '.run_id' run.json)
+          test -n "$run_id"
+          test "$run_id" != "null"
+          echo "RUN_ID=$run_id" >> "$GITHUB_ENV"
+
+      - name: Poll discovery to completion
+        shell: bash
+        run: |
+          for i in $(seq 1 240); do
+            curl --silent --show-error --max-time 30 "$API/discovery/runs/$RUN_ID" -o state.json
+            status=$(jq -r '.status' state.json)
+            stage=$(jq -r '.stage' state.json)
+            progress=$(jq -r '.progress' state.json)
+            echo "poll=$i status=$status progress=$progress stage=$stage"
+            if [ "$status" = "completed" ]; then
+              echo "DISCOVERY COMPLETED"
+              jq '{run_id,status,stage,progress,result:{candidate_count:.result.candidate_count,researched_count:.result.researched_count,accounts:(.result.accounts|map({company_name,score,tier,why_now,product_fit}) )}}' state.json
+              exit 0
+            fi
+            if [ "$status" = "failed" ]; then
+              echo "DISCOVERY FAILED"
+              jq . state.json
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "Timed out waiting for discovery"
+          jq . state.json
+          exit 1
