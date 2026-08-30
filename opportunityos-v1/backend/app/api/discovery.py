@@ -27,10 +27,35 @@ def _set_run(run_id: int, **values):
         db.close()
 
 
+def _progress_percent(stage: str) -> int:
+    s = (stage or "").lower()
+    if "complete" in s:
+        return 100
+    if "ranking" in s:
+        return 72
+    if "research" in s:
+        return 46
+    if "enrich" in s:
+        return 38
+    if "candidate" in s or "discover" in s:
+        return 20
+    if "product brain" in s:
+        return 8
+    if "queued" in s:
+        return 2
+    if "failed" in s:
+        return 100
+    return 5
+
+
 async def _execute_run(run_id: int, req: DiscoveryRequest):
-    _set_run(run_id, status="running", stage="Discovering accounts")
+    _set_run(run_id, status="running", stage="Building Product Brain")
+
+    def report(stage: str):
+        _set_run(run_id, status="running", stage=stage)
+
     try:
-        result = await run_discovery(req)
+        result = await run_discovery(req, progress=report)
         _set_run(run_id, status="completed", stage="Complete", response_json=result.model_dump(mode="json"), error=None)
     except Exception as exc:
         _set_run(run_id, status="failed", stage="Failed", error=f"{type(exc).__name__}: {str(exc)[:1500]}")
@@ -48,7 +73,7 @@ async def create_discovery_run(req: DiscoveryRequest):
     finally:
         db.close()
     asyncio.create_task(_execute_run(run_id, req))
-    return {"run_id": run_id, "status": "queued", "stage": "Queued"}
+    return {"run_id": run_id, "status": "queued", "stage": "Queued", "progress": 2}
 
 
 @router.get("/runs/{run_id}")
@@ -58,7 +83,14 @@ async def get_discovery_run(run_id: int):
         row = db.get(DiscoveryRun, run_id)
         if not row:
             raise HTTPException(status_code=404, detail="Discovery run not found")
-        return {"run_id": row.id, "status": row.status, "stage": row.stage, "result": row.response_json, "error": row.error}
+        return {
+            "run_id": row.id,
+            "status": row.status,
+            "stage": row.stage,
+            "progress": _progress_percent(row.stage),
+            "result": row.response_json,
+            "error": row.error,
+        }
     finally:
         db.close()
 
