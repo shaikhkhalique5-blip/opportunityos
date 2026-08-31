@@ -11,6 +11,8 @@ from app.services.discovery import (
 )
 
 ProgressCallback = Callable[[str], None]
+TARGET_RESEARCH_COUNT = 30
+QUALIFIED_SCORE = 85
 
 
 def _emit(progress: ProgressCallback | None, stage: str):
@@ -20,6 +22,10 @@ def _emit(progress: ProgressCallback | None, stage: str):
 
 async def run_discovery(req: DiscoveryRequest, progress: ProgressCallback | None = None) -> DiscoveryResponse:
     started = perf_counter()
+
+    # Keep discovery behavior consistent regardless of an older frontend/client value.
+    req.icp.account_limit = TARGET_RESEARCH_COUNT
+
     _emit(progress, "Building Product Brain")
     brain = await build_seller_brain(req)
 
@@ -37,12 +43,12 @@ async def run_discovery(req: DiscoveryRequest, progress: ProgressCallback | None
         if host and host not in seen:
             seen.add(host)
             merged.append(row)
-    merged = merged[: req.icp.account_limit]
+    merged = merged[:TARGET_RESEARCH_COUNT]
     print(
-        f"DISCOVERY merged_candidates={len(merged)} amplemarket={len(amplemarket)} apollo={len(apollo)} public={len(public)}",
+        f"DISCOVERY merged_candidates={len(merged)} target={TARGET_RESEARCH_COUNT} amplemarket={len(amplemarket)} apollo={len(apollo)} public={len(public)}",
         flush=True,
     )
-    _emit(progress, f"Candidates selected · {len(merged)} accounts")
+    _emit(progress, f"Candidates selected · {len(merged)}/{TARGET_RESEARCH_COUNT} accounts")
 
     if not merged:
         status = {
@@ -101,8 +107,8 @@ async def run_discovery(req: DiscoveryRequest, progress: ProgressCallback | None
             "clay": "connected" if settings.clay_webhook_url else "not_configured",
         }
         elapsed = perf_counter() - started
-        print(f"DISCOVERY finished accounts=0 elapsed_seconds={elapsed:.1f} reason=no_researchable_candidates", flush=True)
-        _emit(progress, "Complete · 0 ranked accounts")
+        print(f"DISCOVERY finished qualified=0 elapsed_seconds={elapsed:.1f} reason=no_researchable_candidates", flush=True)
+        _emit(progress, f"Complete · 0 opportunities scored {QUALIFIED_SCORE}+")
         return DiscoveryResponse(
             seller_brain=brain,
             accounts=[],
@@ -111,8 +117,7 @@ async def run_discovery(req: DiscoveryRequest, progress: ProgressCallback | None
             provider_status=status,
         )
 
-    # Ranking used to run serially. Bound concurrency keeps OpenAI load controlled while
-    # removing the largest avoidable source of end-to-end latency.
+    # Bound concurrency keeps OpenAI load controlled while ranking the full research batch.
     ranking_concurrency = max(1, min(4, len(evidence)))
     rank_sem = asyncio.Semaphore(ranking_concurrency)
     ranked_done = 0
@@ -130,7 +135,9 @@ async def run_discovery(req: DiscoveryRequest, progress: ProgressCallback | None
                         "task": (
                             "Rank this account for the seller using only supplied evidence. "
                             "Amplemarket metadata establishes ICP/account identity and may include a buyer contact, but is not itself proof of purchase intent. "
-                            "Infer buyer roles only when unsupported person identities are absent. Verify buying-window claims from research evidence."
+                            "Infer buyer roles only when unsupported person identities are absent. Verify buying-window claims from research evidence. "
+                            "Use the scoring rubric strictly. Scores of 85+ require strong product/ICP fit plus credible, observable and sufficiently recent evidence of a buying window. "
+                            "Do not inflate scores simply to qualify an account."
                         ),
                         "seller_brain": brain.model_dump(),
                         "icp": req.icp.model_dump(),
@@ -148,7 +155,9 @@ async def run_discovery(req: DiscoveryRequest, progress: ProgressCallback | None
                 _emit(progress, f"Ranking opportunities · {ranked_done}/{len(evidence)}")
 
     ranked = await asyncio.gather(*(rank_one(item) for item in evidence))
-    accounts = [account for account in ranked if account is not None]
+
+    # Hard quality gate: only expose accounts scoring 85 or higher to the customer.
+    accounts = [account for account in ranked if account is not None and account.score >= QUALIFIED_SCORE]
     accounts.sort(key=lambda x: x.score, reverse=True)
 
     status = {
@@ -158,8 +167,11 @@ async def run_discovery(req: DiscoveryRequest, progress: ProgressCallback | None
         "clay": "connected" if settings.clay_webhook_url else "not_configured",
     }
     elapsed = perf_counter() - started
-    print(f"DISCOVERY finished accounts={len(accounts)} elapsed_seconds={elapsed:.1f}", flush=True)
-    _emit(progress, f"Complete · {len(accounts)} ranked accounts")
+    print(
+        f"DISCOVERY finished qualified={len(accounts)} threshold={QUALIFIED_SCORE} researched={len(evidence)} elapsed_seconds={elapsed:.1f}",
+        flush=True,
+    )
+    _emit(progress, f"Complete · {len(accounts)} opportunities scored {QUALIFIED_SCORE}+")
     return DiscoveryResponse(
         seller_brain=brain,
         accounts=accounts,
