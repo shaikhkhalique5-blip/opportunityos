@@ -74,14 +74,42 @@ async def run_discovery(req: DiscoveryRequest, progress: ProgressCallback | None
     _emit(progress, f"Researching accounts · 0/{len(enriched)}")
     researched_done = 0
 
-    async def research_one(candidate: dict) -> dict:
+    async def research_one(candidate: dict) -> dict | None:
         nonlocal researched_done
-        result = await research_candidate(candidate, brain)
-        researched_done += 1
-        _emit(progress, f"Researching accounts · {researched_done}/{len(enriched)}")
-        return result
+        try:
+            return await research_candidate(candidate, brain)
+        except Exception as exc:
+            company = candidate.get("company_name", "")
+            website = candidate.get("website", "")
+            print(
+                f"DISCOVERY research_error company={company[:80]} website={website[:160]} error={type(exc).__name__}: {str(exc)[:240]}",
+                flush=True,
+            )
+            return None
+        finally:
+            researched_done += 1
+            _emit(progress, f"Researching accounts · {researched_done}/{len(enriched)}")
 
-    evidence = await asyncio.gather(*(research_one(x) for x in enriched))
+    evidence_results = await asyncio.gather(*(research_one(x) for x in enriched))
+    evidence = [item for item in evidence_results if item is not None]
+
+    if not evidence:
+        status = {
+            "amplemarket": "primary_connected" if settings.amplemarket_api_key else "not_configured",
+            "apollo": "connected" if settings.apollo_api_key else "not_configured",
+            "public_web": "connected" if settings.tavily_api_key else "not_configured",
+            "clay": "connected" if settings.clay_webhook_url else "not_configured",
+        }
+        elapsed = perf_counter() - started
+        print(f"DISCOVERY finished accounts=0 elapsed_seconds={elapsed:.1f} reason=no_researchable_candidates", flush=True)
+        _emit(progress, "Complete · 0 ranked accounts")
+        return DiscoveryResponse(
+            seller_brain=brain,
+            accounts=[],
+            candidate_count=len(merged),
+            researched_count=0,
+            provider_status=status,
+        )
 
     # Ranking used to run serially. Bound concurrency keeps OpenAI load controlled while
     # removing the largest avoidable source of end-to-end latency.
