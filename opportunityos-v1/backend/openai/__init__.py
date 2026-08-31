@@ -1,8 +1,8 @@
 """Compatibility shim for the previous OpenAI client surface.
 
-OpportunityOS now routes structured-generation tasks to Gemini first and
-Anthropic second. Existing service code can keep calling OpenAI(...).responses.create
-while we finish removing the old provider-specific function names.
+OpportunityOS now routes structured-generation tasks through a vendor-independent
+provider order. Gemini is primary, Anthropic is fallback, and OpenAI can remain a
+temporary migration fallback until the new provider keys are configured.
 """
 
 import json
@@ -17,7 +17,7 @@ class _Responses:
     def __init__(self, api_key: str = ""):
         self.api_key = api_key
 
-    def _gemini(self, *, model: str, input: list[dict], text: dict):
+    def _gemini(self, *, input: list[dict], text: dict):
         if not settings.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY is not configured")
         schema = (((text or {}).get("format") or {}).get("schema") or {})
@@ -80,15 +80,37 @@ class _Responses:
             raise RuntimeError("Anthropic returned empty output")
         return SimpleNamespace(output_text=cleaned)
 
+    def _openai_http(self, *, model: str, input: list[dict], text: dict):
+        key = settings.openai_api_key or self.api_key
+        if not key:
+            raise RuntimeError("OPENAI_API_KEY is not configured")
+        body = {"model": model, "input": input, "text": text}
+        headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+        with httpx.Client(timeout=90) as client:
+            response = client.post("https://api.openai.com/v1/responses", headers=headers, json=body)
+            response.raise_for_status()
+            data = response.json()
+        chunks = []
+        for item in data.get("output") or []:
+            for block in item.get("content") or []:
+                if block.get("type") in ("output_text", "text"):
+                    chunks.append(str(block.get("text") or ""))
+        output_text = "".join(chunks) or str(data.get("output_text") or "")
+        if not output_text.strip():
+            raise RuntimeError("OpenAI returned empty output")
+        return SimpleNamespace(output_text=output_text)
+
     def create(self, *, model: str, input: list[dict], text: dict, **kwargs):
         errors = []
         providers = [p.strip().lower() for p in settings.llm_provider_order.split(",") if p.strip()]
         for provider in providers:
             try:
                 if provider == "gemini":
-                    result = self._gemini(model=model, input=input, text=text)
+                    result = self._gemini(input=input, text=text)
                 elif provider == "anthropic":
                     result = self._anthropic(input=input, text=text)
+                elif provider == "openai":
+                    result = self._openai_http(model=model, input=input, text=text)
                 else:
                     continue
                 print(f"LLM provider={provider} status=success", flush=True)
