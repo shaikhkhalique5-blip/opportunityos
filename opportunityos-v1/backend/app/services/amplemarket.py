@@ -116,7 +116,6 @@ async def _search_with_relaxation(client: httpx.AsyncClient, headers: dict, body
             print(f"DISCOVERY amplemarket_relax removing={pointer}", flush=True)
             current.pop(pointer, None)
             continue
-        # If Amplemarket does not identify the field, relax the riskiest enum filters in order.
         removed = False
         for key in ("company_industries", "person_job_functions", "person_titles", "company_sizes", "company_locations"):
             if key in current:
@@ -129,7 +128,7 @@ async def _search_with_relaxation(client: httpx.AsyncClient, headers: dict, body
     return r
 
 
-async def amplemarket_candidates(req: DiscoveryRequest, brain: SellerBrain) -> list[dict]:
+async def amplemarket_candidates(req: DiscoveryRequest, brain: SellerBrain, page: int = 1) -> list[dict]:
     if not settings.amplemarket_api_key:
         return []
     headers = {"Authorization": f"Bearer {settings.amplemarket_api_key}", "Content-Type": "application/json"}
@@ -139,8 +138,8 @@ async def amplemarket_candidates(req: DiscoveryRequest, brain: SellerBrain) -> l
         "company_industries": req.icp.industries or brain.target_industries[:8],
         "person_titles": (req.icp.target_titles or brain.target_titles)[:12],
         "person_job_functions": (req.icp.target_functions or brain.target_functions)[:8],
-        "page": 1,
-        "page_size": min(max(req.icp.account_limit * 5, 50), 100),
+        "page": max(1, page),
+        "page_size": 100,
     }
     body = {k: v for k, v in body.items() if v not in (None, [], "")}
     async with httpx.AsyncClient(timeout=40, follow_redirects=True) as client:
@@ -153,7 +152,7 @@ async def amplemarket_candidates(req: DiscoveryRequest, brain: SellerBrain) -> l
             rows = data.get("results") or data.get("people") or data.get("data") or []
             if isinstance(rows, dict):
                 rows = rows.get("results") or rows.get("people") or []
-            print(f"DISCOVERY amplemarket_people={len(rows)}", flush=True)
+            print(f"DISCOVERY amplemarket_people={len(rows)} page={page}", flush=True)
             out, seen = [], set()
             for person in rows:
                 row = _company_from_person(person)
@@ -164,9 +163,7 @@ async def amplemarket_candidates(req: DiscoveryRequest, brain: SellerBrain) -> l
                     continue
                 seen.add(host)
                 out.append(row)
-                if len(out) >= max(req.icp.account_limit * 2, 20):
-                    break
-            print(f"DISCOVERY amplemarket_companies={len(out)}", flush=True)
+            print(f"DISCOVERY amplemarket_companies={len(out)} page={page}", flush=True)
             return out
         except Exception as exc:
             print(f"DISCOVERY amplemarket_error={type(exc).__name__}: {str(exc)[:300]}", flush=True)
