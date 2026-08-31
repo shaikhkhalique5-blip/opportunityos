@@ -16,7 +16,7 @@ class ICPFilters(BaseModel):
     target_titles: list[str] = Field(default_factory=list)
     headcount_min: int = 50
     headcount_max: int = 5000
-    account_limit: int = Field(default=25, ge=5, le=100)
+    account_limit: int = Field(default=30, ge=5, le=100)
     signal_window_days: int = Field(default=90, ge=7, le=365)
 
 
@@ -68,7 +68,7 @@ class ICPPreview(BaseModel):
     recommended_titles: list[str] = Field(default_factory=list)
     headcount_min: int = Field(ge=1)
     headcount_max: int = Field(ge=1)
-    account_limit: int = Field(default=10, ge=5, le=100)
+    account_limit: int = Field(default=30, ge=5, le=100)
     signal_window_days: int = Field(default=90, ge=7, le=365)
     segments: list[ICPSegment] = Field(default_factory=list)
     trigger_signals: list[SignalDefinition] = Field(default_factory=list)
